@@ -1,0 +1,485 @@
+---
+title: "ADA Final Project"
+author: "Nidhi Shinde"
+date: '2022-11-24'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 'Impact of Obesity among US adults with Arthritis 2017-2020'
+
+###Primary Objectives:
+###a. Determine whether BMI status (underweight, normal, overweight, obese) is associated with doctor-diagnosed arthritis.
+###b. Determine whether BMI status (underweight, normal, overweight, obese) are associated with the type of arthritis diagnosis (Osteoarthritis, Rheumatoid, Psoriatic).
+
+###Secondary Objectives:
+###c. Determine whether moderate recreational activity modifies the association between obesity and doctor- diagnosed arthritis.
+
+
+### Loading libraries
+```{r}
+pacman::p_load(odds.n.ends, blorr, lmtest, car, broom, tidyverse, jtools, dplyr, ggplot2, haven, stringr, hmisc, table1) 
+library(tidyverse)
+library(dplyr)
+library(gtsummary)
+
+```
+
+```{r}
+#loading data from different dataset
+bmi <- read_xpt("P_BMX.XPT")
+demo <- read_xpt("P_DEMO.XPT")
+medCondition <- read_xpt("P_MCQ.XPT")
+physact <- read_xpt("P_PAQ.XPT")
+```
+
+### Merging datasets
+```{r}
+#merging bmi and demographics data by common ID number SEQN
+merge1 <- merge(bmi, demo, by="SEQN")
+```
+
+```{r}
+#merging merge1 data and medical conditions data by common ID number SEQN
+merge2 <- merge(merge1, medCondition, by="SEQN")
+```
+
+```{r}
+#merging merge2 data and physical activity data by common ID number SEQN
+merge.final <- merge(merge2, physact, by="SEQN")
+```
+
+### Making Final dataset
+```{r}
+# making 2 smaller dataset by selecting the variables needed for analysis
+arthritis <- merge.final %>% 
+  select(SEQN, BMXBMI, RIAGENDR, RIDAGEYR, RIDRETH3, MCQ160A, PAQ665)
+arthritis_type <- merge.final %>% 
+  select(SEQN, BMXBMI, RIAGENDR, RIDAGEYR, RIDRETH3, MCQ195, PAQ665)
+
+#summarizing dataset
+summary(arthritis)
+summary(arthritis_type)
+```
+
+### Recoding Arthritis data
+```{r}
+#recoding data and renaming variables
+arthritis_recode <- arthritis %>% 
+  mutate(RIAGENDR = recode_factor(RIAGENDR,
+                                '1' = 'Male',
+                                '2' = 'Female')) %>% 
+  mutate(RIDRETH3 = recode_factor(RIDRETH3,
+                                  '1' = 'Mexican American',
+                                  '2' = 'Other Hispanic',
+                                  '3' = 'Non-Hispanic White',
+                                  '4' = 'Non-Hispanic Black',
+                                  '6' = 'Non-Hispanic Asian',
+                                  '7' = 'Other Race/Multi-racial')) %>% 
+  mutate(MCQ160A = recode_factor(MCQ160A,
+                                 '1' = 'Yes',
+                                 '2' = 'No',
+                                 '7' = NA_character_,
+                                 '9' = NA_character_)) %>% 
+  
+  mutate(PAQ665 = recode_factor(PAQ665,
+                               '1' = 'Yes', 
+                                '2' = 'No',
+                               '7' = NA_character_,
+                               '9' = NA_character_)) %>% 
+  
+  rename(BMI = BMXBMI) %>% 
+  rename(Sex = RIAGENDR) %>% 
+  rename(Age = RIDAGEYR) %>% 
+  rename(Race = RIDRETH3) %>% 
+  rename(Arthritis = MCQ160A) %>% 
+  rename(Physical_activity = PAQ665)
+
+
+```
+
+###Adding new BMI category variable to Arthritis data
+```{r}
+#converting BMI variable from numeric to categorical and adding a new variable bmi.cat
+arthritis_recode <- within(arthritis_recode, {   
+  bmi.cat <- NA # need to initialize variable
+  bmi.cat[BMI < 18.5] <- "Underweight (<18.5)"
+  bmi.cat[BMI >= 18.5 & BMI < 25] <- "Healthy (18.5 to <25)"
+  bmi.cat[BMI >= 25 & BMI < 30] <- "Overweight (25 to <30)"
+  bmi.cat[BMI >= 30] <- "Obese (>30)"
+   } )
+arthritis_recode$bmi.cat <- as.factor(arthritis_recode$bmi.cat)
+class(arthritis_recode$bmi.cat) #checking class of variable
+```
+
+###Recoding Arthritis_type data
+```{r}
+# recoding data and renaming variables
+arthritis.type_recode <- arthritis_type %>% 
+  mutate(RIAGENDR = recode_factor(RIAGENDR,
+                                '1' = 'Male',
+                                '2' = 'Female')) %>% 
+  mutate(RIDRETH3 = recode_factor(RIDRETH3,
+                                  '1' = 'Mexican American',
+                                  '2' = 'Other Hispanic',
+                                  '3' = 'Non-Hispanic White',
+                                  '4' = 'Non-Hispanic Black',
+                                  '6' = 'Non-Hispanic Asian',
+                                  '7' = 'Other Race/Multi-racial')) %>% 
+
+mutate(MCQ195 = recode_factor(MCQ195,
+                                '1' = 'Osteoarthritis or degenerative arthritis',
+                                '2' = 'Rheumatoid arthritis',
+                                '3' = 'Psoriatic arthritis',
+                                '4' = 'Other',
+                                '7' = NA_character_,
+                                '9' = NA_character_)) %>% 
+  mutate(PAQ665 = recode_factor(PAQ665,
+                               '1' = 'Yes', 
+                                '2' = 'No',
+                               '7' = NA_character_,
+                               '9' = NA_character_)) %>% 
+  
+  rename(BMI = BMXBMI) %>% 
+  rename(Sex = RIAGENDR) %>% 
+  rename(Age = RIDAGEYR) %>% 
+  rename(Race = RIDRETH3) %>% 
+  rename(Arthritis_type = MCQ195) %>% 
+  rename(Physical_activity = PAQ665) 
+  
+```
+
+
+###Adding BMI category variable to Arthritis_type data
+```{r}
+arthritis.type_recode <- within(arthritis.type_recode, {   
+  bmi.cat <- NA # need to initialize variable
+  bmi.cat[BMI < 18.5] <- "Underweight (<18.5)"
+  bmi.cat[BMI >= 18.5 & BMI < 25] <- "Healthy (18.5 to <25)"
+  bmi.cat[BMI >= 25 & BMI < 30] <- "Overweight (25 to <30)"
+  bmi.cat[BMI >= 30] <- "Obese (>30)"
+   } )
+
+arthritis.type_recode$bmi.cat <- as.factor(arthritis.type_recode$bmi.cat)
+```
+
+
+###Omitting NA values from both datasets
+```{r}
+arthritis_clean <- na.omit(arthritis_recode)
+arthritis.type_clean <- na.omit(arthritis.type_recode)
+```
+
+###Summarizing both datasets
+```{r}
+summary(arthritis_clean)
+summary(arthritis.type_clean)
+```
+
+###Creating factor levels for Arthritis data and a descriptive table
+```{r}
+arthritis_clean <- arthritis_clean %>% 
+  mutate(bmi.cat = factor(bmi.cat,
+                          levels = c("Healthy (18.5 to <25)", "Obese (>30)", "Overweight (25 to <30)", "Underweight (<18.5)")),
+         Sex = factor(Sex,
+                         levels = c("Male", "Female")),
+         Race = factor(Race,
+                       levels = c("Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race/Multi-racial")),
+         Arthritis = factor(Arthritis,
+                            levels = c("No", "Yes")),
+         Physical_activity = factor(Physical_activity,
+                                    levels = c("No", "Yes")))
+
+#Making a descriptive table
+label(arthritis_clean$bmi.cat) = "BMI category"
+label(arthritis_clean$Physical_activity) = "Moderate physical activity in a week"
+table1(~ BMI + bmi.cat + Sex + Age + Race + Arthritis + Physical_activity, data = arthritis_clean)
+```
+
+
+###Creating factor levels for Arthritis_type data and making a descriptive table
+```{r}
+arthritis.type_clean <- arthritis.type_clean %>% 
+  mutate(bmi.cat = factor(bmi.cat,
+                          levels = c("Healthy (18.5 to <25)", "Obese (>30)", "Overweight (25 to <30)", "Underweight (<18.5)")),
+         Sex = factor(Sex,
+                         levels = c("Male", "Female")),
+         Race = factor(Race,
+                       levels = c("Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race/Multi-racial")),
+         Arthritis_type = factor(Arthritis_type,
+                            levels = c("Rheumatoid arthritis", "Osteoarthritis or degenerative arthritis", "Psoriatic arthritis", "Other")),
+         Physical_activity = factor(Physical_activity,
+                                    levels = c("Yes", "No")))
+
+label(arthritis.type_clean$Arthritis_type) = "Arthritis type"
+label(arthritis.type_clean$bmi.cat) = "BMI category"
+label(arthritis.type_clean$Physical_activity) = "Moderate physical activity in a week"
+table1(~ BMI + bmi.cat + Sex + Age + Race + Arthritis_type + Physical_activity, data = arthritis.type_clean)
+```
+
+
+```{r}
+#combining underweight and normal into one category because very few observations for underweight
+arthritis_clean <- arthritis_clean %>%
+  mutate(bmi.cat2 = if_else(bmi.cat %in% c("Underweight (<18.5)", "Healthy (18.5 to <25)"), 0,
+                            if_else(bmi.cat == "Overweight (25 to <30)", 1,
+                                    if_else(bmi.cat =="Obese (>30)", 2, NULL))))
+
+arthritis_clean$bmi.cat2 <- factor(arthritis_clean$bmi.cat2, levels = c(0:2), labels = c("Underweight/Healthy (<25)", "Overweight (25 to <30)", "Obese (>30)"))
+
+table(arthritis_clean$bmi.cat2, useNA="always")
+```
+
+```{r}
+#combining underweight and normal into one category because very few observations for underweight
+arthritis.type_clean <- arthritis.type_clean %>%
+  mutate(bmi.cat2 = if_else(bmi.cat %in% c("Underweight (<18.5)", "Healthy (18.5 to <25)"), 0,
+                            if_else(bmi.cat == "Overweight (25 to <30)", 1,
+                                    if_else(bmi.cat =="Obese (>30)", 2, NULL))))
+
+arthritis.type_clean$bmi.cat2 <- factor(arthritis.type_clean$bmi.cat2, levels = c(0:2), labels = c("Underweight/Healthy (<25)", "Overweight (25 to <30)", "Obese (>30)"))
+```
+
+###Making descriptive table of sample population by arthritis diagnosis
+```{r}
+# plotting outcome described by the predictors
+label(arthritis_clean$bmi.cat2) = "BMI category"
+label(arthritis_clean$Physical_activity) = "Moderate physical activity in a week"
+table1(~ bmi.cat2 + Age + Sex + Race + Physical_activity | Arthritis,
+       data = arthritis_clean)
+```
+
+###Making a boxplot to visualize difference between BMI distribution by Arthritis diagnosis
+```{r}
+ggplot(arthritis_clean, aes(x = Arthritis, y = BMI)) +
+      geom_boxplot(aes(fill = Arthritis)) +
+      labs(x = "Arthritis diagnosis", y = "BMI (kg/m2)") +
+      theme_bw()
+```
+###Interpretation: Individuals diagnosed with arthritis seem to have higher BMI than individuals who do not have arthritis.
+
+
+```{r}
+ggplot(arthritis.type_clean, aes(x = Arthritis_type, y = BMI)) +
+      geom_boxplot(aes(fill = Arthritis_type)) +
+      labs(x = "Type of Arthritis diagnosed", y = "BMI (kg/m2)") +
+      theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1,
+                                       hjust = 1, ))
+```
+
+### Fitting a logistic regression model (unadjusted) to assess effect of BMI (continuous variable) on arthritis diagnosis
+```{r}
+logmodel1<- glm(Arthritis ~ BMI, data=arthritis_clean, family=binomial(link = "logit"))
+broom::tidy(logmodel1, exponentiate = TRUE, conf.int = TRUE)
+summary(logmodel1)
+```
+
+###With every unit increase in BMI, the odds of being diagnosed with arthritis increase by 1.04 times.
+
+
+
+## Test the linearity assumption for BMI using the Box Tidwell test
+```{r}
+arthritis_clean <- arthritis_clean %>%
+  mutate(bmi.logbmi = BMI * log(BMI)) 
+
+logmodel2 <- glm(Arthritis ~ BMI + bmi.logbmi, data=arthritis_clean, family=binomial(link = "logit")) 
+
+summary(logmodel2)
+```
+###Since the p-value is significant (<0.05), the linearity assumption is violated for BMI.
+
+
+###As the linearity assumption is violated, categorical BMI will be used to fit the model
+```{r}
+logmodel3<- glm(Arthritis ~bmi.cat2, data=arthritis_clean, family=binomial(link = "logit"))
+broom::tidy(logmodel3, exponentiate = TRUE, conf.int = TRUE)
+summary(logmodel3)
+
+
+```
+###Individuals who are overweight have 1.3 times the odds of being diagnosed with arthritis than those who are underweight/normal.
+###Individuals who are obese have 1.9 times the odds of being diagnosed with arthritis than those who are underweight/normal.
+
+
+```{r}
+#Making a table for model estimates
+ logmodel3%>%
+  tbl_regression(exponentiate = TRUE,
+                 pvalue_fun = ~style_pvalue(.x, digits = 3),) %>%
+  add_global_p() %>% 
+  as_gt() %>%
+  gt::tab_source_note(gt::md("*Footnote*"))
+  
+  
+```
+
+
+###Fitting an adjusted logistic model adjusting for age, gender, race and moderate physical activity
+```{r}
+logmodel4<- glm(Arthritis ~ bmi.cat2 + Age + Sex + Race + Physical_activity, data=arthritis_clean, family=binomial(link = "logit"))
+broom::tidy(logmodel4, exponentiate = TRUE, conf.int = TRUE)
+summary(logmodel4)
+```
+
+
+```{r}
+##Making a table for model estimates
+logmodel4%>%
+  tbl_regression(exponentiate = TRUE,
+                 pvalue_fun = ~style_pvalue(.x, digits = 3),) %>%
+  add_global_p() %>% 
+  as_gt() %>%
+  gt::tab_source_note(gt::md("*Footnote*"))
+  
+```
+
+
+###Checking for multicollinearity
+```{r}
+car::vif(logmodel4)
+```
+
+###Multicollineaerity doesn't seem to exist
+
+###Checking for influential observations using Cook's distance
+```{r}
+# Plot Cooks's Distance
+plot(logmodel4, which = 4, id.n = 3, col="red")
+```
+
+## Get Cook's D calculations for each obervation 
+```{r}
+logmodel4.data <- broom::augment(logmodel4) %>%  
+  mutate(index = 1:n()) 
+
+head(logmodel4.data)
+```
+## Identify and excluding observations with a Cook's Distance greater than a cutoff by using 3 x the mean Cook's D 
+```{r}
+cuttoff <- mean(logmodel4.data$.cooksd)*3 
+
+Arthritis_out <- logmodel4.data %>% 
+  filter(.cooksd<cuttoff)
+
+nrow(Arthritis_out)/nrow(arthritis_clean) # check percent kept
+```
+
+## Model age, gender, race, physical activity and bmi status logistic model with observations excluded
+```{r}
+logmodel5<- glm(Arthritis ~ bmi.cat2 + Age + Sex + Race + Physical_activity, data=Arthritis_out, family=binomial(link = "logit"))
+broom::tidy(logmodel5, exponentiate = TRUE, conf.int = TRUE)
+summary(logmodel5)
+```
+
+
+
+
+
+
+###Compare models
+```{r}
+compareCoefs(logmodel4, logmodel5) 
+```
+
+
+```{r}
+#checking variables by Arthritis diagnosis
+table(Arthritis_out$bmi.cat2, Arthritis_out$Arthritis)
+```
+
+```{r}
+# comparing with original dataset
+table(arthritis_clean$bmi.cat2, arthritis_clean$Arthritis)
+```
+###The model excluded alot of observations which is not ideal, so we will use previous model(without exclusions)
+
+
+###Model fit assessment of logmodel4
+```{r}
+# Hosmer lemeshow goodness of fit test: a significant p value indicates a bad fit
+blr_test_hosmer_lemeshow(logmodel4)
+```
+
+
+## Comparing the full model to the reduced model with the lrtest function to see whether age, gender, race, physical activity significantly improve model fit?
+```{r}
+# likelihood ratio test: compare two nested models
+lrtest(logmodel3, logmodel4)
+```
+###Based on the model results from model 4, we can conclude that after adjusting for age, gender, race, and physical activity, BMI status is significantly associated with Arthritis diagnosis.
+
+
+###Fitting a multinomial logistic regression model (unadjusted) to assess effect of BMI on type of arthritis diagnosed
+```{r}
+multimodel1 <- nnet::multinom(Arthritis_type ~ bmi.cat2, data = arthritis.type_clean)
+broom::tidy(multimodel1, exponentiate = TRUE, conf.int = TRUE)
+summary(multimodel1)
+```
+
+###The relative risk of individuals being obese is 5.5 times of those being underweight/normal for being diagnosed with Psoriatic arthritis compared to Rheumatoid arthritis.
+
+```{r}
+#Making a table for model estimates
+ multimodel1%>%
+  tbl_regression(exponentiate = TRUE,
+                 pvalue_fun = ~style_pvalue(.x, digits = 3),) %>%
+  add_global_p() %>% 
+  as_gt() %>%
+  gt::tab_source_note(gt::md("*Footnote*"))
+  
+  
+```
+
+
+###Adjusting for age, gender, race, physical activity
+```{r}
+multimodel2 <- nnet::multinom(Arthritis_type ~ bmi.cat2 + Age + Sex + Race + Physical_activity,
+                              data = arthritis.type_clean)
+broom::tidy(multimodel2, exponentiate = TRUE, conf.int = TRUE)
+summary(multimodel2)
+```
+
+```{r}
+#Making a table for model estimates
+ multimodel2%>%
+  tbl_regression(exponentiate = TRUE,
+                 pvalue_fun = ~style_pvalue(.x, digits = 3),) %>%
+  add_global_p() %>% 
+  as_gt() %>%
+  gt::tab_source_note(gt::md("*Footnote*"))
+  
+```
+
+
+###Comparing models
+```{r}
+# likelihood ratio test: compare two nested models
+lrtest(multimodel1, multimodel2)
+```
+###Based on the model results from model 2, we can conclude that after adjusting for age, gender, race, and physical activity, BMI status is significantly associated with type of arthritis diagnosed.
+
+
+###Checking for effect modifaction by physical activity on BMI status
+```{r}
+int.model1<- glm(Arthritis ~ bmi.cat2 + Age + Sex + Race + Physical_activity + bmi.cat2*Physical_activity,
+                 data=arthritis_clean, family=binomial(link = "logit"))
+broom::tidy(int.model1, exponentiate = TRUE, conf.int = TRUE)
+summary(int.model1)
+```
+###checking model fit
+```{r}
+blr_test_hosmer_lemeshow(int.model1)
+```
+
+###Comparing models
+```{r}
+lrtest(logmodel4, int.model1)
+```
+###The p-value is not significant, so the model including interaction term shows there isn't any signficant association between the interaction term and arthritis. Hence, there is no effect modification present.
+
+
